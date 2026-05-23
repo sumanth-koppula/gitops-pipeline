@@ -28,6 +28,11 @@ spec:
     namespace: gitops-dev
 
   # ── Sync Policy ───────────────────────────────────────────────────────────
+  ignoreDifferences:
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /status/terminatingReplicas
   syncPolicy:
     automated:
       prune: true                    # Remove resources deleted from Git

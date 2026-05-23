@@ -18,11 +18,11 @@ spec:
 
   # ── Allowed Destination Clusters & Namespaces ────────────────────────────
   destinations:
-    - server: https://kubernetes.default.svc   # In-cluster (ArgoCD running in same cluster)
+    - server: https://kubernetes.default.svc
       namespace: gitops-dev
-    - server: https://kubernetes.default.svc
+    - server: https://35.254.123.31
       namespace: gitops-staging
-    - server: https://kubernetes.default.svc
+    - server: https://34.55.113.47
       namespace: gitops-prod
     # Add additional clusters here if using multi-cluster setup:
     # - server: https://STAGING_CLUSTER_ENDPOINT
