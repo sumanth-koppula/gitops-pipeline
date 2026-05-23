@@ -22,9 +22,14 @@ spec:
     path: k8s/overlays/staging
 
   destination:
-    server: https://kubernetes.default.svc
+    server: https://35.254.123.31
     namespace: gitops-staging
 
+  ignoreDifferences:
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /status/terminatingReplicas
   syncPolicy:
     automated:
       prune: true

@@ -23,9 +23,14 @@ spec:
     path: k8s/overlays/prod
 
   destination:
-    server: https://kubernetes.default.svc
+    server: https://34.55.113.47
     namespace: gitops-prod
 
+  ignoreDifferences:
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /status/terminatingReplicas
   syncPolicy:
     # ⚠️ NO automated sync in prod — manual trigger required
     # automated: {}   ← intentionally commented out
