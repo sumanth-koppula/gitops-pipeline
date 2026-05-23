@@ -4,15 +4,14 @@ kind: Deployment
 metadata:
   name: gitops-demo
 spec:
-  replicas: 3                        # HA: 3 replicas across 3 nodes
+  replicas: 3
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
-      maxUnavailable: 0              # Zero downtime — never remove a pod before a new one is ready
+      maxUnavailable: 0
   template:
     spec:
-      # Spread across availability zones for resilience
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
@@ -30,9 +29,7 @@ spec:
               memory: "512Mi"
               cpu: "500m"
           env:
-            - name: NODE_ENV
-              value: production
             - name: LOG_LEVEL
-              value: warn             # Minimal logging in prod
+              value: warn
             - name: MEMORY_LIMIT_MB
               value: "512"

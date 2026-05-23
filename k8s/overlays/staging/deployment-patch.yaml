@@ -4,7 +4,7 @@ kind: Deployment
 metadata:
   name: gitops-demo
 spec:
-  replicas: 2                        # 2 replicas — mirrors prod topology
+  replicas: 2
   template:
     spec:
       containers:
@@ -17,7 +17,5 @@ spec:
               memory: "256Mi"
               cpu: "200m"
           env:
-            - name: NODE_ENV
-              value: staging
             - name: LOG_LEVEL
               value: info
