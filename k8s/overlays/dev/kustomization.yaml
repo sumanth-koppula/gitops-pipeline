@@ -4,27 +4,27 @@ kind: Kustomization
 
 namespace: gitops-dev
 
-bases:
-  - ../../base
 
 # Image updated by GitHub Actions: kustomize edit set image
 images:
-  - name: gitops-demo
-    newName: gcr.io/p3-cicd-pipeline/gitops-demo
-    newTag: dev-latest
+- name: gitops-demo
+  newName: gcr.io/p3-cicd-pipeline/gitops-demo
+  newTag: dev-33cc9c1-11
 
 patches:
-  - path: deployment-patch.yaml
-    target:
-      kind: Deployment
-      name: gitops-demo
-  - path: configmap-patch.yaml
-    target:
-      kind: ConfigMap
-      name: gitops-demo-config
+- path: deployment-patch.yaml
+  target:
+    kind: Deployment
+    name: gitops-demo
+- path: configmap-patch.yaml
+  target:
+    kind: ConfigMap
+    name: gitops-demo-config
 
 commonLabels:
   environment: dev
 
 commonAnnotations:
   deployment.kubernetes.io/environment: dev
+resources:
+- ../../base
