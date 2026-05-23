@@ -12,6 +12,9 @@ on:
       - 'app/**'
       - '.github/workflows/ci-dev.yml'
 
+permissions:
+  contents: write
+
 concurrency:
   group: deploy-dev
   cancel-in-progress: true   # Only one dev deploy at a time
