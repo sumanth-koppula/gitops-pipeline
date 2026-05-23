@@ -8,7 +8,7 @@ namespace: gitops-staging
 images:
 - name: gitops-demo
   newName: gcr.io/p3-cicd-pipeline/gitops-demo
-  newTag: staging-fec9fc3-9
+  newTag: staging-7be0c72-10
 
 patches:
 - path: deployment-patch.yaml
