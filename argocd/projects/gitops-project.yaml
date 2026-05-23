@@ -18,11 +18,11 @@ spec:
 
   # ── Allowed Destination Clusters & Namespaces ────────────────────────────
   destinations:
-    - server: https://kubernetes.default.svc   # In-cluster (ArgoCD running in same cluster)
+    - server: https://kubernetes.default.svc
       namespace: gitops-dev
-    - server: https://kubernetes.default.svc
+    - server: https://35.254.123.31
       namespace: gitops-staging
-    - server: https://kubernetes.default.svc
+    - server: https://34.55.113.47
       namespace: gitops-prod
     # Add additional clusters here if using multi-cluster setup:
     # - server: https://STAGING_CLUSTER_ENDPOINT
@@ -64,19 +64,3 @@ spec:
       groups:
         - platform-team
 
-  # ── Sync Windows — prevent deploys during off-hours in prod ──────────────
-  syncWindows:
-    - kind: deny
-      schedule: '0 22 * * *'         # No prod deploys after 10pm
-      duration: 8h
-      applications:
-        - gitops-demo-prod
-      namespaces:
-        - gitops-prod
-      manualSync: false              # Block even manual syncs
-
-    - kind: allow
-      schedule: '0 9 * * 1-5'       # Allow prod deploys Mon-Fri 9am+
-      duration: 13h
-      applications:
-        - gitops-demo-prod
