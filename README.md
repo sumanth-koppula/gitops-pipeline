@@ -183,3 +183,4 @@ kubectl apply -f argocd/applications/
 git checkout -b dev
 git push origin dev
 ```
+# GitOps Pipeline - P3 Project
