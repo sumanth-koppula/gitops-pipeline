@@ -4,30 +4,30 @@ kind: Kustomization
 
 namespace: gitops-prod
 
-bases:
-  - ../../base
 
 images:
-  - name: gitops-demo
-    newName: gcr.io/p3-cicd-pipeline/gitops-demo
-    newTag: latest                   # Updated by CI to exact pinned tag
+- name: gitops-demo
+  newName: gcr.io/p3-cicd-pipeline/gitops-demo
+  newTag: staging-7be0c72-10
 
 patches:
-  - path: deployment-patch.yaml
-    target:
-      kind: Deployment
-      name: gitops-demo
-  - path: configmap-patch.yaml
-    target:
-      kind: ConfigMap
-      name: gitops-demo-config
-  - path: hpa-patch.yaml
-    target:
-      kind: HorizontalPodAutoscaler
-      name: gitops-demo-hpa
+- path: deployment-patch.yaml
+  target:
+    kind: Deployment
+    name: gitops-demo
+- path: configmap-patch.yaml
+  target:
+    kind: ConfigMap
+    name: gitops-demo-config
+- path: hpa-patch.yaml
+  target:
+    kind: HorizontalPodAutoscaler
+    name: gitops-demo-hpa
 
 commonLabels:
   environment: prod
 
 commonAnnotations:
   deployment.kubernetes.io/environment: prod
+resources:
+- ../../base
