@@ -43,7 +43,7 @@ RUN npm ci --frozen-lockfile --only=production \
     && npm cache clean --force
 
 # Copy application source (no test files, no dev config)
-COPY --chown=appuser:appgroup app/src ./src
+COPY --chown=appuser:appgroup src ./src
 
 # Drop root privileges
 USER appuser
@@ -73,4 +73,4 @@ LABEL org.opencontainers.image.title="gitops-demo" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.source="https://github.com/YOUR_ORG/gitops-pipeline"
+      org.opencontainers.image.source="https://github.com/sumanth-koppula/gitops-pipeline"
