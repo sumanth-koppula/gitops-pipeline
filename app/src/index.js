@@ -22,7 +22,8 @@ app.get('/', (req, res) => {
     service: 'gitops-demo',
     version: SERVICE_VERSION,
     environment: ENVIRONMENT,
-    status: 'running'
+    status: 'running',
+    message: 'GitOps Demo Service is running'
   });
 });
 
@@ -30,7 +31,6 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-// Only start server if run directly — not when imported by tests
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`[INFO] Service starting...`);
@@ -40,5 +40,4 @@ if (require.main === module) {
   });
 }
 
-// Always export app directly so tests can use: const app = require('./index')
 module.exports = app;
