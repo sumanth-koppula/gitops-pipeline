@@ -26,3 +26,5 @@ spec:
               value: warn
             - name: MEMORY_LIMIT_MB
               value: "128"
+      imagePullSecrets:
+        - name: gcr-secret
