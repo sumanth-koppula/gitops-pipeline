@@ -1,0 +1,138 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PR Checks — Runs on every Pull Request
+# Validates: lint, unit tests, Docker build, Kustomize validation
+# Does NOT push images or update manifests
+# ─────────────────────────────────────────────────────────────────────────────
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [dev, main, 'release/**']
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-checks-${{ github.head_ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ── 1. Lint ────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: app
+        run: npm run lint
+
+  # ── 2. Unit Tests ─────────────────────────────────────────────────────────
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Run tests with coverage
+        working-directory: app
+        run: npm test -- --ci --coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: app/coverage/
+          retention-days: 7
+
+  # ── 3. Docker Build Validation ────────────────────────────────────────────
+  docker-build:
+    name: Docker Build (validation only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: app
+          file: app/Dockerfile
+          push: false
+          tags: gitops-demo:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.pull_request.created_at }}
+            GIT_SHA=${{ github.sha }}
+            VERSION=pr-${{ github.event.pull_request.number }}
+
+  # ── 4. Kubernetes Manifest Validation ────────────────────────────────────
+  k8s-validate:
+    name: Validate K8s Manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Validate dev overlay
+        run: kustomize build k8s/overlays/dev | kubectl apply --dry-run=client -f -
+
+      - name: Validate staging overlay
+        run: kustomize build k8s/overlays/staging | kubectl apply --dry-run=client -f -
+
+      - name: Validate prod overlay
+        run: kustomize build k8s/overlays/prod | kubectl apply --dry-run=client -f -
+
+  # ── 5. PR Summary ─────────────────────────────────────────────────────────
+  pr-summary:
+    name: PR Summary
+    needs: [lint, test, docker-build, k8s-validate]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "## PR Check Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Build | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| K8s Validate | ${{ needs.k8s-validate.result }} |" >> $GITHUB_STEP_SUMMARY

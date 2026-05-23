@@ -1,0 +1,35 @@
+# helm/gitops-app/values-staging.yaml
+# Overrides for the STAGING environment
+image:
+  tag: staging-latest
+
+app:
+  environment: staging
+  logLevel: info
+
+replicaCount: 2
+
+resources:
+  requests:
+    memory: "64Mi"
+    cpu: "50m"
+  limits:
+    memory: "256Mi"
+    cpu: "200m"
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+ingress:
+  enabled: true
+  host: gitops-demo.staging.example.com
+  tls:
+    enabled: true
+    secretName: gitops-demo-staging-tls
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

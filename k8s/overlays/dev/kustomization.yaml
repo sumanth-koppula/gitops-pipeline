@@ -1,0 +1,30 @@
+# k8s/overlays/dev/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gitops-dev
+
+bases:
+  - ../../base
+
+# Image updated by GitHub Actions: kustomize edit set image
+images:
+  - name: gitops-demo
+    newName: gcr.io/p3-cicd-pipeline/gitops-demo
+    newTag: dev-latest
+
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: gitops-demo
+  - path: configmap-patch.yaml
+    target:
+      kind: ConfigMap
+      name: gitops-demo-config
+
+commonLabels:
+  environment: dev
+
+commonAnnotations:
+  deployment.kubernetes.io/environment: dev

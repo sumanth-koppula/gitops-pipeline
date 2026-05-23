@@ -1,0 +1,15 @@
+# k8s/overlays/prod/hpa-patch.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gitops-demo-hpa
+spec:
+  minReplicas: 3    # Always 3 pods minimum in prod
+  maxReplicas: 10   # Scale up to 10 under heavy load
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60    # More aggressive threshold in prod

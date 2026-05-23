@@ -1,0 +1,33 @@
+# k8s/overlays/prod/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gitops-prod
+
+bases:
+  - ../../base
+
+images:
+  - name: gitops-demo
+    newName: gcr.io/p3-cicd-pipeline/gitops-demo
+    newTag: latest                   # Updated by CI to exact pinned tag
+
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: gitops-demo
+  - path: configmap-patch.yaml
+    target:
+      kind: ConfigMap
+      name: gitops-demo-config
+  - path: hpa-patch.yaml
+    target:
+      kind: HorizontalPodAutoscaler
+      name: gitops-demo-hpa
+
+commonLabels:
+  environment: prod
+
+commonAnnotations:
+  deployment.kubernetes.io/environment: prod

@@ -1,0 +1,38 @@
+# k8s/overlays/prod/deployment-patch.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitops-demo
+spec:
+  replicas: 3                        # HA: 3 replicas across 3 nodes
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0              # Zero downtime — never remove a pod before a new one is ready
+  template:
+    spec:
+      # Spread across availability zones for resilience
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: gitops-demo
+      containers:
+        - name: gitops-demo
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: LOG_LEVEL
+              value: warn             # Minimal logging in prod
+            - name: MEMORY_LIMIT_MB
+              value: "512"

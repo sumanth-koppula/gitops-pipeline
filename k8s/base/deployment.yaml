@@ -1,0 +1,143 @@
+# k8s/base/deployment.yaml
+# Base deployment — environment-specific values are patched via overlays
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitops-demo
+  labels:
+    app: gitops-demo
+    managed-by: argocd
+spec:
+  replicas: 1                        # Overridden per environment
+  revisionHistoryLimit: 5            # Keep last 5 ReplicaSets for rollback
+  selector:
+    matchLabels:
+      app: gitops-demo
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1                    # One extra pod during update
+      maxUnavailable: 0              # Zero downtime rolling update
+  template:
+    metadata:
+      labels:
+        app: gitops-demo
+      annotations:
+        # Force pod restart when ConfigMap changes
+        checksum/config: "placeholder"
+    spec:
+      serviceAccountName: gitops-demo-sa
+      terminationGracePeriodSeconds: 30
+
+      # ── Security Context (Pod level) ──────────────────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 2000
+
+      # ── Init Containers ───────────────────────────────────────────────────
+      initContainers:
+        - name: wait-for-dependencies
+          image: busybox:1.36
+          command: ['sh', '-c', 'echo "Dependencies ready (demo: no external deps)"']
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+
+      # ── Main Container ────────────────────────────────────────────────────
+      containers:
+        - name: gitops-demo
+          image: gitops-demo:latest    # kustomize edit set image replaces this
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+
+          # ── Environment Variables ────────────────────────────────────────
+          env:
+            - name: NODE_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: gitops-demo-config
+                  key: NODE_ENV
+            - name: PORT
+              value: "3000"
+            - name: SERVICE_VERSION
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['app.kubernetes.io/version']
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+          # ── Resource Limits ───────────────────────────────────────────────
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+
+          # ── Probes ────────────────────────────────────────────────────────
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2        # App has up to 60s to start
+
+          # ── Security Context (Container level) ────────────────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+          # ── Volume Mounts ─────────────────────────────────────────────────
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      # ── Volumes ──────────────────────────────────────────────────────────
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+      # ── Topology ─────────────────────────────────────────────────────────
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: [gitops-demo]
+                topologyKey: kubernetes.io/hostname

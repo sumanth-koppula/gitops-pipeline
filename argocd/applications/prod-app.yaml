@@ -1,0 +1,53 @@
+# argocd/applications/prod-app.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitops-demo-prod
+  namespace: argocd
+  labels:
+    environment: prod
+    app: gitops-demo
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: prod-deploys
+    notifications.argoproj.io/subscribe.on-sync-failed.slack:    prod-incidents
+    notifications.argoproj.io/subscribe.on-health-degraded.slack: prod-incidents
+    notifications.argoproj.io/subscribe.on-deployed.slack:       prod-deploys
+spec:
+  project: gitops-demo
+
+  source:
+    repoURL: https://github.com/sumanth-koppula/gitops-pipeline.git
+    targetRevision: HEAD             # Use HEAD of the release branch (pinned by CI)
+    path: k8s/overlays/prod
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitops-prod
+
+  syncPolicy:
+    # ⚠️ NO automated sync in prod — manual trigger required
+    # automated: {}   ← intentionally commented out
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 2
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m
+
+  ignoreDifferences:
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /spec/currentReplicas
+        - /spec/minReplicas         # Ops may tune this live without Git drift alert
+
+  # Keep long history for audit trail
+  revisionHistoryLimit: 20

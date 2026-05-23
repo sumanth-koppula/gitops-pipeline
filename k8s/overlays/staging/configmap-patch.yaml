@@ -1,0 +1,9 @@
+# k8s/overlays/staging/configmap-patch.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitops-demo-config
+data:
+  NODE_ENV: "staging"
+  LOG_LEVEL: "info"
+  MEMORY_LIMIT_MB: "256"

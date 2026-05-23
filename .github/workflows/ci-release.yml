@@ -1,0 +1,256 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Release Branch Pipeline → Production Environment
+# Trigger: push to 'release/*' branch
+# Flow: Test → Build → Push GCR → Manual Approval Gate → Update manifest
+#       → ArgoCD syncs prod → Post-deploy verification
+# ─────────────────────────────────────────────────────────────────────────────
+name: CI/CD — Production
+
+on:
+  push:
+    branches: ['release/**']
+    paths:
+      - 'app/**'
+      - '.github/workflows/ci-release.yml'
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Specific image tag to promote to prod (leave blank to build fresh)'
+        required: false
+        type: string
+      skip_approval:
+        description: 'Skip manual approval gate (emergency only)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false   # NEVER cancel a prod deployment
+
+env:
+  NODE_VERSION: '20'
+  ENVIRONMENT: prod
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  IMAGE_NAME: gcr.io/${{ secrets.GCP_PROJECT_ID }}/gitops-demo
+  GKE_CLUSTER: gitops-prod-cluster
+  GKE_ZONE: us-central1-a
+  PROD_URL: ${{ secrets.PROD_URL }}
+
+jobs:
+  # ── 1. Pre-flight Checks ──────────────────────────────────────────────────
+  preflight:
+    name: Pre-flight Checks
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.tag }}
+      branch:  ${{ steps.version.outputs.branch }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract release version
+        id: version
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          VERSION="${BRANCH#release/}"
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          TAG="prod-${VERSION}-${SHORT_SHA}"
+          echo "tag=${TAG}"     >> $GITHUB_OUTPUT
+          echo "branch=${BRANCH}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Production release: ${VERSION} → tag: ${TAG}"
+
+      - name: Validate semver format
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "❌ Branch name must follow release/X.Y.Z format. Got: $VERSION"
+            exit 1
+          fi
+          echo "✅ Version format valid: $VERSION"
+
+  # ── 2. Full Test Suite ────────────────────────────────────────────────────
+  test:
+    name: Full Test Suite
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Run tests (strict mode)
+        working-directory: app
+        run: npm test -- --ci --coverage --coverageThreshold='{"global":{"lines":80}}'
+        env:
+          NODE_ENV: test
+
+  # ── 3. Security & Compliance ──────────────────────────────────────────────
+  security:
+    name: Security & Compliance
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: npm audit (fail on HIGH+)
+        working-directory: app
+        run: npm audit --audit-level=high
+
+      - name: Trivy filesystem scan (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: 'app/'
+          severity: 'CRITICAL'
+          exit-code: '1'
+
+  # ── 4. Build & Push ───────────────────────────────────────────────────────
+  build-push:
+    name: Build & Push
+    needs: [test, security]
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag:    ${{ steps.meta.outputs.tag }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: meta
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+            echo "Using pre-built image: ${{ inputs.image_tag }}"
+          else
+            echo "tag=${{ needs.preflight.outputs.version }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker gcr.io --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push production image
+        id: build
+        if: ${{ !inputs.image_tag }}   # Skip if promoting existing image
+        uses: docker/build-push-action@v5
+        with:
+          context: app
+          file: app/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:latest
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_SHA=${{ github.sha }}
+            VERSION=${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy image scan (block on CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+  # ── 5. Manual Approval Gate ───────────────────────────────────────────────
+  approval:
+    name: Manual Approval — Production
+    needs: build-push
+    runs-on: ubuntu-latest
+    if: ${{ inputs.skip_approval != 'true' }}
+    environment:
+      name: production          # GitHub Environment with required reviewers
+      url: ${{ env.PROD_URL }}
+    steps:
+      - name: Approval checkpoint
+        run: |
+          echo "✅ Approved by: ${{ github.actor }}"
+          echo "Image to deploy: ${{ env.IMAGE_NAME }}:${{ needs.build-push.outputs.image-tag }}"
+
+  # ── 6. Update Production Manifests ───────────────────────────────────────
+  update-manifests:
+    name: Update Prod Manifests
+    needs: [build-push, approval]
+    if: always() && needs.build-push.result == 'success' && (needs.approval.result == 'success' || inputs.skip_approval == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ needs.preflight.outputs.branch }}
+
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Update prod overlay image
+        working-directory: k8s/overlays/prod
+        run: |
+          kustomize edit set image gitops-demo=${{ env.IMAGE_NAME }}:${{ needs.build-push.outputs.image-tag }}
+
+      - name: Tag the release commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/prod/kustomization.yaml
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(prod): deploy ${{ needs.build-push.outputs.image-tag }}
+
+            Approved by: ${{ github.actor }}
+            Source SHA:  ${{ github.sha }}
+            Run:         ${{ github.run_number }}"
+            git push
+          fi
+          # Tag the production release
+          git tag -a "v${{ needs.preflight.outputs.version }}" \
+            -m "Production release ${{ needs.preflight.outputs.version }}"
+          git push origin "v${{ needs.preflight.outputs.version }}"
+
+  # ── 7. Post-Deploy Verification ───────────────────────────────────────────
+  verify:
+    name: Post-Deploy Verification
+    needs: update-manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for ArgoCD sync
+        run: sleep 180   # 3 minute window for ArgoCD poll + rollout
+
+      - name: Health checks (prod)
+        run: |
+          for ENDPOINT in /health/live /health/ready /api/v1/info; do
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "${{ env.PROD_URL }}${ENDPOINT}")
+            if [ "$STATUS" != "200" ]; then
+              echo "❌ FAILED: ${ENDPOINT} returned HTTP ${STATUS}"
+              exit 1
+            fi
+            echo "✅ PASSED: ${ENDPOINT} → HTTP ${STATUS}"
+          done
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## 🚀 Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.build-push.outputs.image-tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Approved by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** ${{ env.PROD_URL }}" >> $GITHUB_STEP_SUMMARY

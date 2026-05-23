@@ -1,0 +1,9 @@
+# k8s/overlays/dev/configmap-patch.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitops-demo-config
+data:
+  NODE_ENV: "development"
+  LOG_LEVEL: "debug"
+  MEMORY_LIMIT_MB: "128"

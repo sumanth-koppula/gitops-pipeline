@@ -1,0 +1,50 @@
+# helm/gitops-app/values-prod.yaml
+# Overrides for the PRODUCTION environment
+image:
+  tag: latest                        # Pinned to exact digest by CI
+
+app:
+  environment: production
+  logLevel: warn
+
+replicaCount: 3
+
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 60
+  targetMemoryUtilizationPercentage: 75
+
+ingress:
+  enabled: true
+  host: gitops-demo.example.com
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  tls:
+    enabled: true
+    secretName: gitops-demo-prod-tls
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2                    # Always keep 2 pods live during disruptions
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: app
+              operator: In
+              values: [gitops-demo]
+        topologyKey: kubernetes.io/hostname   # Force pods to different nodes

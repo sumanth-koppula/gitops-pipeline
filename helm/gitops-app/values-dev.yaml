@@ -1,0 +1,30 @@
+# helm/gitops-app/values-dev.yaml
+# Overrides for the DEV environment
+image:
+  tag: dev-latest
+
+app:
+  environment: development
+  logLevel: debug
+
+replicaCount: 1
+
+resources:
+  requests:
+    memory: "32Mi"
+    cpu: "25m"
+  limits:
+    memory: "128Mi"
+    cpu: "100m"
+
+autoscaling:
+  enabled: false
+
+ingress:
+  enabled: true
+  host: gitops-demo.dev.example.com
+  tls:
+    enabled: false
+
+podDisruptionBudget:
+  enabled: false

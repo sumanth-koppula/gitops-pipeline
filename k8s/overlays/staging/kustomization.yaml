@@ -1,0 +1,29 @@
+# k8s/overlays/staging/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gitops-staging
+
+bases:
+  - ../../base
+
+images:
+  - name: gitops-demo
+    newName: gcr.io/p3-cicd-pipeline/gitops-demo
+    newTag: staging-latest
+
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: gitops-demo
+  - path: configmap-patch.yaml
+    target:
+      kind: ConfigMap
+      name: gitops-demo-config
+
+commonLabels:
+  environment: staging
+
+commonAnnotations:
+  deployment.kubernetes.io/environment: staging

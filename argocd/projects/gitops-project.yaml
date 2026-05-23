@@ -1,0 +1,82 @@
+# argocd/projects/gitops-project.yaml
+# ArgoCD AppProject — scopes what repos/clusters/namespaces each app can touch
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: gitops-demo
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io  # Cascade-delete apps when project is deleted
+spec:
+  description: "GitOps Demo — all environments"
+
+  # ── Allowed Source Repositories ───────────────────────────────────────────
+  sourceRepos:
+    - https://github.com/sumanth-koppula/gitops-pipeline.git
+    # Also allow Helm chart repos if needed:
+    # - https://charts.helm.sh/stable
+
+  # ── Allowed Destination Clusters & Namespaces ────────────────────────────
+  destinations:
+    - server: https://kubernetes.default.svc   # In-cluster (ArgoCD running in same cluster)
+      namespace: gitops-dev
+    - server: https://kubernetes.default.svc
+      namespace: gitops-staging
+    - server: https://kubernetes.default.svc
+      namespace: gitops-prod
+    # Add additional clusters here if using multi-cluster setup:
+    # - server: https://STAGING_CLUSTER_ENDPOINT
+    #   namespace: gitops-staging
+
+  # ── Allowed Kubernetes Resource Types ────────────────────────────────────
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace                 # Allow creating namespaces
+
+  namespaceResourceWhitelist:
+    - group: 'apps'
+      kind: Deployment
+    - group: 'autoscaling'
+      kind: HorizontalPodAutoscaler
+    - group: ''
+      kind: Service
+    - group: ''
+      kind: ConfigMap
+    - group: ''
+      kind: ServiceAccount
+    - group: 'networking.k8s.io'
+      kind: Ingress
+
+  # ── RBAC — who can sync/manage apps in this project ──────────────────────
+  roles:
+    - name: dev-deployer
+      description: Can sync dev environment
+      policies:
+        - p, proj:gitops-demo:dev-deployer, applications, sync, gitops-demo/gitops-demo-dev, allow
+        - p, proj:gitops-demo:dev-deployer, applications, get,  gitops-demo/gitops-demo-dev, allow
+      groups:
+        - dev-team
+
+    - name: release-manager
+      description: Can sync all environments including prod
+      policies:
+        - p, proj:gitops-demo:release-manager, applications, *, gitops-demo/*, allow
+      groups:
+        - platform-team
+
+  # ── Sync Windows — prevent deploys during off-hours in prod ──────────────
+  syncWindows:
+    - kind: deny
+      schedule: '0 22 * * *'         # No prod deploys after 10pm
+      duration: 8h
+      applications:
+        - gitops-demo-prod
+      namespaces:
+        - gitops-prod
+      manualSync: false              # Block even manual syncs
+
+    - kind: allow
+      schedule: '0 9 * * 1-5'       # Allow prod deploys Mon-Fri 9am+
+      duration: 13h
+      applications:
+        - gitops-demo-prod

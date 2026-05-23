@@ -1,0 +1,206 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Main Branch Pipeline → Staging Environment
+# Trigger: push to 'main' branch (merged PR)
+# Flow: Test → Build → Push GCR → Update manifest → ArgoCD syncs staging
+# Extra: Integration tests after deployment
+# ─────────────────────────────────────────────────────────────────────────────
+name: CI/CD — Staging
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'k8s/**'
+      - '.github/workflows/ci-main.yml'
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false   # Never cancel staging deploys mid-flight
+
+env:
+  NODE_VERSION: '20'
+  ENVIRONMENT: staging
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  IMAGE_NAME: gcr.io/${{ secrets.GCP_PROJECT_ID }}/gitops-demo
+  GKE_CLUSTER: gitops-staging-cluster
+  GKE_ZONE: us-central1-a
+  STAGING_URL: ${{ secrets.STAGING_URL }}
+
+jobs:
+  # ── 1. Test (full suite) ───────────────────────────────────────────────────
+  test:
+    name: Full Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Run tests
+        working-directory: app
+        run: npm test -- --ci --coverage
+        env:
+          NODE_ENV: test
+
+      - name: Upload coverage to artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-coverage
+          path: app/coverage/
+
+  # ── 2. Security Scan ──────────────────────────────────────────────────────
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Run npm audit
+        working-directory: app
+        run: npm audit --audit-level=high
+        continue-on-error: true   # Don't fail build, but log it
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: 'app/'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+  # ── 3. Build & Push ───────────────────────────────────────────────────────
+  build-push:
+    name: Build & Push
+    needs: [test, security-scan]
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tag }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          TAG="staging-${SHORT_SHA}-${{ github.run_number }}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker gcr.io --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: app
+          file: app/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:staging-latest
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_SHA=${{ github.sha }}
+            VERSION=${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan pushed image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'   # Fail on CRITICAL/HIGH in staging image
+
+  # ── 4. Update Manifests ───────────────────────────────────────────────────
+  update-manifests:
+    name: Update Staging Manifests
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Update image tag in staging overlay
+        working-directory: k8s/overlays/staging
+        run: |
+          kustomize edit set image gitops-demo=${{ env.IMAGE_NAME }}:${{ needs.build-push.outputs.image-tag }}
+
+      - name: Commit manifest update
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/staging/kustomization.yaml
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(staging): deploy ${{ needs.build-push.outputs.image-tag }}
+
+            Source commit: ${{ github.sha }}
+            Message: ${{ github.event.head_commit.message }}"
+            git push origin main
+          fi
+
+  # ── 5. Wait for ArgoCD Sync & Smoke Test ─────────────────────────────────
+  smoke-test:
+    name: Smoke Test
+    needs: update-manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for ArgoCD to sync (3 min polling window)
+        run: |
+          echo "Waiting for ArgoCD to detect and sync changes..."
+          sleep 120   # ArgoCD polls every 3 min; give it time
+
+      - name: Health check — staging
+        run: |
+          MAX_RETRIES=10
+          RETRY_INTERVAL=15
+          for i in $(seq 1 $MAX_RETRIES); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.STAGING_URL }}/health")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Staging health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i: Status ${STATUS}, retrying in ${RETRY_INTERVAL}s..."
+            sleep $RETRY_INTERVAL
+          done
+          echo "❌ Staging health check failed after $MAX_RETRIES attempts"
+          exit 1
+
+      - name: API smoke test — staging
+        run: |
+          RESPONSE=$(curl -sf "${{ env.STAGING_URL }}/api/v1/info")
+          echo "API response: $RESPONSE"
+          echo "$RESPONSE" | grep -q "gitops-demo" && echo "✅ API smoke test passed"

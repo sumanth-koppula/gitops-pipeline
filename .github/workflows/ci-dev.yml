@@ -1,0 +1,182 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dev Branch Pipeline
+# Trigger: push to 'dev' branch
+# Flow: Test → Build → Push GCR → Update K8s manifest → ArgoCD auto-syncs
+# ─────────────────────────────────────────────────────────────────────────────
+name: CI/CD — Dev
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'app/**'
+      - '.github/workflows/ci-dev.yml'
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: true   # Only one dev deploy at a time
+
+env:
+  NODE_VERSION: '20'
+  ENVIRONMENT: dev
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCR_REGISTRY: gcr.io
+  IMAGE_NAME: gcr.io/${{ secrets.GCP_PROJECT_ID }}/gitops-demo
+  GKE_CLUSTER: gitops-dev-cluster
+  GKE_ZONE: us-central1-a
+
+jobs:
+  # ── 1. Test ────────────────────────────────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.coverage.outputs.total }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Run tests
+        working-directory: app
+        run: npm test -- --ci --coverage
+        env:
+          NODE_ENV: test
+
+      - id: coverage
+        name: Extract coverage
+        working-directory: app
+        run: |
+          COVERAGE=$(cat coverage/coverage-summary.json | node -e \
+            "const d=require('/dev/stdin');console.log(d.total.lines.pct)")
+          echo "total=${COVERAGE}" >> $GITHUB_OUTPUT
+          echo "Code coverage: ${COVERAGE}%"
+
+  # ── 2. Build & Push Image ─────────────────────────────────────────────────
+  build-push:
+    name: Build & Push
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tag }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          TAG="${{ env.ENVIRONMENT }}-${SHORT_SHA}-${{ github.run_number }}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "short-sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "Image tag: ${TAG}"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker gcr.io --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push to GCR
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: app
+          file: app/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:${{ env.ENVIRONMENT }}-latest
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_SHA=${{ github.sha }}
+            VERSION=${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false   # Reduces image size
+
+      - name: Output image info
+        run: |
+          echo "## 🐳 Image Built & Pushed" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry:** \`${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** \`${{ steps.meta.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ── 3. Update Kubernetes Manifests ────────────────────────────────────────
+  update-manifests:
+    name: Update K8s Manifests
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: dev
+
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Update image tag in dev overlay
+        working-directory: k8s/overlays/dev
+        run: |
+          kustomize edit set image gitops-demo=${{ env.IMAGE_NAME }}:${{ needs.build-push.outputs.image-tag }}
+          echo "Updated image to: ${{ env.IMAGE_NAME }}:${{ needs.build-push.outputs.image-tag }}"
+
+      - name: Commit and push manifest update
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add k8s/overlays/dev/kustomization.yaml
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit — image tag already up-to-date"
+          else
+            git commit -m "chore(dev): update image to ${{ needs.build-push.outputs.image-tag }}
+
+            Triggered by: ${{ github.event.head_commit.message }}
+            Commit: ${{ github.sha }}
+            Run: ${{ github.run_number }}"
+            git push origin dev
+          fi
+
+  # ── 4. Notify ─────────────────────────────────────────────────────────────
+  notify:
+    name: Notify
+    needs: [test, build-push, update-manifests]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Deployment summary
+        run: |
+          STATUS="${{ needs.update-manifests.result }}"
+          echo "## 🚀 Dev Deployment $STATUS" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.test.result }} (coverage: ${{ needs.test.outputs.coverage }}%) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build & Push | ${{ needs.build-push.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Manifest Update | ${{ needs.update-manifests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**ArgoCD** will auto-sync the dev environment within 3 minutes." >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,56 @@
+# argocd/applications/dev-app.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitops-demo-dev
+  namespace: argocd
+  labels:
+    environment: dev
+    app: gitops-demo
+  # Auto-delete K8s resources when this ArgoCD Application is deleted
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: dev-deploys
+    notifications.argoproj.io/subscribe.on-sync-failed.slack:    dev-alerts
+spec:
+  project: gitops-demo
+
+  # ── Source — Git repository + path ───────────────────────────────────────
+  source:
+    repoURL: https://github.com/sumanth-koppula/gitops-pipeline.git
+    targetRevision: dev              # Track the dev branch
+    path: k8s/overlays/dev           # Kustomize overlay for dev
+
+  # ── Destination — cluster + namespace ────────────────────────────────────
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitops-dev
+
+  # ── Sync Policy ───────────────────────────────────────────────────────────
+  syncPolicy:
+    automated:
+      prune: true                    # Remove resources deleted from Git
+      selfHeal: true                 # Re-sync if cluster drifts from Git
+      allowEmpty: false              # Never sync an empty app
+    syncOptions:
+      - CreateNamespace=true         # Auto-create gitops-dev namespace
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true               # Prune after new resources are healthy
+      - ApplyOutOfSyncOnly=true      # Only apply changed resources (faster)
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # ── Health Checks ─────────────────────────────────────────────────────────
+  ignoreDifferences:
+    # Ignore HPA currentReplicas — it changes dynamically
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /spec/currentReplicas
+
+  revisionHistoryLimit: 10

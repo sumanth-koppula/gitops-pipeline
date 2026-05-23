@@ -1,0 +1,21 @@
+# helm/gitops-app/Chart.yaml
+apiVersion: v2
+name: gitops-app
+description: |
+  Helm chart for the GitOps CI/CD demo application.
+  Supports dev / staging / prod via separate values files.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+keywords:
+  - gitops
+  - nodejs
+  - gke
+
+maintainers:
+  - name: platform-team
+    email: platform@yourorg.com
+
+annotations:
+  category: Application
