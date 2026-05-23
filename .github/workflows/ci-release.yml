@@ -25,6 +25,9 @@ on:
         type: choice
         options: ['false', 'true']
 
+permissions:
+  contents: write
+
 concurrency:
   group: deploy-prod
   cancel-in-progress: false   # NEVER cancel a prod deployment
