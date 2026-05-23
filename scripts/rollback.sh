@@ -148,7 +148,7 @@ elif [[ "${STRATEGY}" == "gitops" ]]; then
     Emergency rollback from $(git rev-parse --short HEAD)
     Operator: $(git config user.email || echo 'unknown')
     Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    git push
+    git push --set-upstream origin $(git rev-parse --abbrev-ref HEAD)
 
     info "Git updated. ArgoCD will auto-sync within 3 minutes."
     info "Force sync now: argocd app sync gitops-demo-${ENVIRONMENT}"
