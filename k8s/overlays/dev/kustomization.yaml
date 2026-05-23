@@ -9,7 +9,7 @@ namespace: gitops-dev
 images:
 - name: gitops-demo
   newName: gcr.io/p3-cicd-pipeline/gitops-demo
-  newTag: dev-8b6fc6b-13
+  newTag: dev-8a6c098-12
 
 patches:
 - path: deployment-patch.yaml
