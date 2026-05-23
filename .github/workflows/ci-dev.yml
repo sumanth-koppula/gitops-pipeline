@@ -56,8 +56,7 @@ jobs:
         name: Extract coverage
         working-directory: app
         run: |
-          COVERAGE=$(cat coverage/coverage-summary.json | node -e \
-            "const d=require('/dev/stdin');console.log(d.total.lines.pct)")
+          COVERAGE=$(node -e "const d=require('./coverage/coverage-summary.json');console.log(d.total.lines.pct)")
           echo "total=${COVERAGE}" >> $GITHUB_OUTPUT
           echo "Code coverage: ${COVERAGE}%"
 
