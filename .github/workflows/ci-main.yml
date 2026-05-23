@@ -191,7 +191,7 @@ jobs:
           MAX_RETRIES=10
           RETRY_INTERVAL=15
           for i in $(seq 1 $MAX_RETRIES); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.STAGING_URL }}/health")
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.STAGING_URL }}/health" || echo "000")
             if [ "$STATUS" = "200" ]; then
               echo "✅ Staging health check passed (attempt $i)"
               exit 0
