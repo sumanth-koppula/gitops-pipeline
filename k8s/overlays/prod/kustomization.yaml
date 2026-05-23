@@ -7,6 +7,10 @@ namespace: gitops-prod
 bases:
   - ../../base
 
+# Exclude HPA — causes ComparisonError with this K8s version
+excludedResources:
+  - kind: HorizontalPodAutoscaler
+
 images:
   - name: gitops-demo
     newName: gcr.io/p3-cicd-pipeline/gitops-demo
@@ -21,10 +25,7 @@ patches:
     target:
       kind: ConfigMap
       name: gitops-demo-config
-  - path: hpa-patch.yaml
-    target:
-      kind: HorizontalPodAutoscaler
-      name: gitops-demo-hpa
+
 
 commonLabels:
   environment: prod
