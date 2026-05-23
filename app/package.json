@@ -34,7 +34,7 @@
         "statements": 80
       }
     },
-    "coverageReporters": ["text", "lcov", "html"]
+    "coverageReporters": ["text", "lcov", "html", "json-summary"]
   },
   "engines": {
     "node": ">=20.0.0"
