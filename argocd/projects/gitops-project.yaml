@@ -64,19 +64,3 @@ spec:
       groups:
         - platform-team
 
-  # ── Sync Windows — prevent deploys during off-hours in prod ──────────────
-  syncWindows:
-    - kind: deny
-      schedule: '0 22 * * *'         # No prod deploys after 10pm
-      duration: 8h
-      applications:
-        - gitops-demo-prod
-      namespaces:
-        - gitops-prod
-      manualSync: false              # Block even manual syncs
-
-    - kind: allow
-      schedule: '0 9 * * 1-5'       # Allow prod deploys Mon-Fri 9am+
-      duration: 13h
-      applications:
-        - gitops-demo-prod
