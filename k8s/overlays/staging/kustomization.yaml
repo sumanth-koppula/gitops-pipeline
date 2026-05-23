@@ -4,26 +4,26 @@ kind: Kustomization
 
 namespace: gitops-staging
 
-bases:
-  - ../../base
 
 images:
-  - name: gitops-demo
-    newName: gcr.io/p3-cicd-pipeline/gitops-demo
-    newTag: staging-latest
+- name: gitops-demo
+  newName: gcr.io/p3-cicd-pipeline/gitops-demo
+  newTag: staging-272f382-6
 
 patches:
-  - path: deployment-patch.yaml
-    target:
-      kind: Deployment
-      name: gitops-demo
-  - path: configmap-patch.yaml
-    target:
-      kind: ConfigMap
-      name: gitops-demo-config
+- path: deployment-patch.yaml
+  target:
+    kind: Deployment
+    name: gitops-demo
+- path: configmap-patch.yaml
+  target:
+    kind: ConfigMap
+    name: gitops-demo-config
 
 commonLabels:
   environment: staging
 
 commonAnnotations:
   deployment.kubernetes.io/environment: staging
+resources:
+- ../../base
