@@ -16,13 +16,15 @@ spec:
         - name: gitops-demo
           resources:
             requests:
-              memory: "64Mi"
-              cpu: "50m"
+              memory: "32Mi"
+              cpu: "25m"
             limits:
-              memory: "256Mi"
-              cpu: "200m"
+              memory: "128Mi"
+              cpu: "100m"
           env:
             - name: LOG_LEVEL
               value: warn
             - name: MEMORY_LIMIT_MB
-              value: "256"
+              value: "128"
+      imagePullSecrets:
+        - name: gcr-secret
